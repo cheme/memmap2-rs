@@ -1038,6 +1038,14 @@ impl MmapMut {
     pub fn unlock(&mut self) -> Result<()> {
         self.inner.unlock()
     }
+
+    /// Expands (or shrinks) an existing memory mapping. Only supported on Unix.
+    ///
+    /// See [mremap()](https://man7.org/linux/man-pages/man2/mremap.2.html) map page.
+    #[cfg(unix)]
+    pub fn remap(&mut self, new_size: usize) -> Result<()> {
+        self.inner.remap(new_size)
+    }
 }
 
 #[cfg(feature = "stable_deref_trait")]
@@ -1132,6 +1140,40 @@ mod test {
         assert_eq!(&incr[..], &mmap[..]);
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn remap_file() {
+        let expected_len = 128;
+        let new_len = 138;
+        let truncate_len = 100;
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("mmap");
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&path)
+            .unwrap();
+
+        file.set_len(expected_len as u64).unwrap();
+
+        let mut mmap = unsafe { MmapMut::map_mut(&file).unwrap() };
+        let len = mmap.len();
+        assert_eq!(expected_len, len);
+
+        let incr: Vec<u8> = (0..new_len as u8).collect();
+        (&mut mmap[..]).write_all(&incr[..len]).unwrap();
+        assert_eq!(&incr[..len], &mmap[..]);
+
+        mmap.remap(new_len).unwrap();
+        (&mut mmap[len..new_len]).write_all(&incr[len..new_len]).unwrap();
+        assert_eq!(&incr[..], &mmap[..]);
+
+        mmap.remap(truncate_len).unwrap();
+        assert_eq!(&incr[..truncate_len], &mmap[..truncate_len]);
+    }
+ 
     #[test]
     #[cfg(unix)]
     fn map_fd() {
